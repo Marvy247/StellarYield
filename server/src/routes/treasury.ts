@@ -21,6 +21,10 @@ import {
 import { successEnvelope, errorEnvelope } from "../types/envelope";
 import { toExportFailure } from "../types/exportFailure";
 import { requireAdmin } from "../middleware/authz";
+import {
+  TreasuryWithdrawalError,
+  treasuryWithdrawalCooldownService,
+} from "../services/treasuryWithdrawalCooldownService";
 
 const router = Router();
 
@@ -351,5 +355,120 @@ router.post("/cashflow/import", requireAdmin, (req: Request, res: Response) => {
     ),
   );
 });
+
+// ── Treasury withdrawal cooldown (#1343) ─────────────────────────────────────
+
+/**
+ * Emit a typed error envelope for treasury withdrawal cooldown routes.
+ * `COOLDOWN_ACTIVE` is retryable once the cooldown lapses; validation and
+ * not-found failures are not.
+ */
+function sendWithdrawalError(res: Response, err: unknown, route: string): void {
+  if (err instanceof TreasuryWithdrawalError) {
+    const classification =
+      err.code === "COOLDOWN_ACTIVE"
+        ? { category: "validation", retryable: true }
+        : { category: "validation", retryable: false };
+    res.status(err.statusCode).json(
+      errorEnvelope(err.code, err.message, route, err.details, classification),
+    );
+    return;
+  }
+  res.status(400).json(
+    errorEnvelope("INVALID_REQUEST", "Invalid request body", route),
+  );
+}
+
+/**
+ * POST /api/treasury/withdrawals
+ * Submit a treasury withdrawal request (admin only). Enforces the per-vault
+ * cooldown: 409 COOLDOWN_ACTIVE while a recent pending withdrawal still
+ * consumes the vault's cooldown window.
+ */
+router.post(
+  "/withdrawals",
+  treasuryMutationLimiter,
+  requireAdmin,
+  (req: Request, res: Response) => {
+    try {
+      const withdrawal = treasuryWithdrawalCooldownService.submitWithdrawal({
+        vaultId: req.body?.vaultId,
+        amountUsd: req.body?.amountUsd,
+        requestedBy:
+          req.body?.requestedBy ??
+          (req as Request & { user?: { id?: string } }).user?.id,
+        memo: req.body?.memo,
+      });
+      res.status(201).json(successEnvelope(withdrawal, "treasury/withdrawals"));
+    } catch (err) {
+      sendWithdrawalError(res, err, "treasury/withdrawals");
+    }
+  },
+);
+
+/**
+ * GET /api/treasury/withdrawals
+ * List withdrawal requests (admin only), newest first. Optional
+ * `?vaultId=` filter.
+ */
+router.get("/withdrawals", requireAdmin, (req: Request, res: Response) => {
+  const vaultId =
+    typeof req.query.vaultId === "string" && req.query.vaultId.length > 0
+      ? { vaultId: req.query.vaultId }
+      : {};
+  res.json(
+    successEnvelope(
+      treasuryWithdrawalCooldownService.listWithdrawals(vaultId),
+      "treasury/withdrawals",
+    ),
+  );
+});
+
+/**
+ * GET /api/treasury/withdrawals/cooldown?vaultId=...
+ * Cooldown status for a vault (admin only): whether a new submission would
+ * be rejected, remaining time, and the blocking pending withdrawal.
+ */
+router.get("/withdrawals/cooldown", requireAdmin, (req: Request, res: Response) => {
+  const vaultId = req.query.vaultId;
+  if (typeof vaultId !== "string" || vaultId.trim().length === 0) {
+    res.status(400).json(
+      errorEnvelope(
+        "INVALID_REQUEST",
+        "vaultId query parameter is required.",
+        "treasury/withdrawals/cooldown",
+        { field: "vaultId" },
+      ),
+    );
+    return;
+  }
+  res.json(
+    successEnvelope(
+      treasuryWithdrawalCooldownService.getCooldownStatus(vaultId.trim()),
+      "treasury/withdrawals/cooldown",
+    ),
+  );
+});
+
+/**
+ * POST /api/treasury/withdrawals/:id/cancel
+ * Cancel a pending withdrawal (admin only), freeing its vault's cooldown
+ * immediately.
+ */
+router.post(
+  "/withdrawals/:id/cancel",
+  treasuryMutationLimiter,
+  requireAdmin,
+  (req: Request, res: Response) => {
+    try {
+      const withdrawal = treasuryWithdrawalCooldownService.cancelWithdrawal(
+        req.params.id,
+      );
+      res.json(successEnvelope(withdrawal, "treasury/withdrawals"));
+    } catch (err) {
+      sendWithdrawalError(res, err, "treasury/withdrawals");
+    }
+  },
+);
 
 export default router;
