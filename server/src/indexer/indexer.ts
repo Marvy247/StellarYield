@@ -10,7 +10,7 @@ const DECODER_VERSION = "1.0.0"; // Semver of current decoder logic
 
 const rpcServer = new StellarSdk.rpc.Server(RPC_URL);
 
-type IndexerPrismaClient = {
+export type IndexerPrismaClient = {
   indexerState: {
     findUnique(args: {
       where: { id: string };
@@ -91,12 +91,47 @@ type IndexerPrismaClient = {
     count(args: {
       where: {
         resolved: boolean;
+        ledger?: { gte?: number; lte?: number };
       };
     }): Promise<number>;
     findFirst(args: {
       where: { resolved: boolean };
       orderBy: { nextRetryAt: "asc" };
     }): Promise<{ nextRetryAt: Date } | null>;
+  };
+  indexerRepairRun: {
+    create(args: {
+      data: {
+        startLedger: number;
+        endLedger: number;
+        restoredCount: number;
+        skippedCount: number;
+        stillMissingCount: number;
+        status: string;
+        failureReasonCode?: string | null;
+        failureReasonMessage?: string | null;
+        startedAt: Date;
+        finishedAt: Date;
+      };
+    }): Promise<{ id: string }>;
+    findMany(args: {
+      orderBy?: { startedAt: "desc" };
+      take?: number;
+    }): Promise<
+      Array<{
+        id: string;
+        startLedger: number;
+        endLedger: number;
+        restoredCount: number;
+        skippedCount: number;
+        stillMissingCount: number;
+        status: string;
+        failureReasonCode: string | null;
+        failureReasonMessage: string | null;
+        startedAt: Date;
+        finishedAt: Date | null;
+      }>
+    >;
   };
 };
 
@@ -373,7 +408,7 @@ async function processEvent(
  * Replay a single dead-letter event. Attempts to decode and store it.
  * Updates retry count and resolves if successful.
  */
-async function replayDeadLetter(
+export async function replayDeadLetter(
   prisma: IndexerPrismaClient,
   deadLetter: {
     id: string;

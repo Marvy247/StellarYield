@@ -26,6 +26,8 @@ import {
   SAGA_STATE,
 } from "../services/rebalanceSagaService";
 import { recoverStuckSagas } from "../services/rebalanceSagaExecutor";
+import { promoteYieldSource } from "../services/yieldSourceRegistryService";
+import { YieldSourceOnboardingError } from "../services/yieldSourceOnboardingService";
 
 const adminRouter = Router();
 
@@ -1019,6 +1021,50 @@ adminRouter.post(
           error instanceof Error
             ? error.message
             : "Failed to recover stuck sagas",
+      });
+    }
+  },
+);
+
+/**
+ * Promote a yield source after it passes the onboarding checklist (#1156).
+ * Incomplete entries are rejected with every missing field named, so they can
+ * never become visible on production routes.
+ * POST /api/admin/yield-sources/promote
+ */
+adminRouter.post(
+  "/yield-sources/promote",
+  requireAdmin,
+  (req: Request, res: Response): void => {
+    try {
+      const body = req.body ?? {};
+      const id = typeof body.id === "string" ? body.id : undefined;
+
+      setAuditContext(req, {
+        action: "PROMOTE_YIELD_SOURCE",
+        resource: "YIELD_SOURCE_REGISTRY",
+        resourceId: id,
+        changes: { id: body.id, name: body.name, source: body.source },
+      });
+
+      const promoted = promoteYieldSource(body);
+
+      res.json({ success: true, source: promoted });
+    } catch (error) {
+      if (error instanceof YieldSourceOnboardingError) {
+        res.status(error.statusCode).json({
+          error: error.message,
+          code: error.code,
+          missingFields: error.details.missingFields,
+          issues: error.details.issues,
+        });
+        return;
+      }
+      res.status(500).json({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to promote yield source",
       });
     }
   },

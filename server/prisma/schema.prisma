@@ -657,6 +657,32 @@ model IndexerContinuityCheck {
   @@index([checkType, checkedAt])
 }
 
+// ── Gap Repair Run Summaries (Issue #1154) ─────────────────────────────────
+
+model IndexerRepairRun {
+  id                   String   @id @default(uuid())
+  /// Start checkpoint of the scanned ledger range.
+  startLedger          Int
+  /// End checkpoint of the scanned ledger range.
+  endLedger            Int
+  /// Dead-letter events replayed successfully during this run.
+  restoredCount        Int      @default(0)
+  /// Dead-letter events already resolved before this run (no action needed).
+  skippedCount         Int      @default(0)
+  /// Dead-letter events still unresolved after this run.
+  stillMissingCount    Int      @default(0)
+  /// completed | failed
+  status               String
+  /// Typed failure reason for failed runs (e.g. REPLAY_ERROR).
+  failureReasonCode    String?
+  failureReasonMessage String?
+  startedAt            DateTime @default(now())
+  finishedAt           DateTime?
+
+  @@index([startedAt])
+  @@index([status, startedAt])
+}
+
 // ── Per-Contract Cursor Models (Issue #888) ─────────────────────────────────
 
 model ContractIndexerCursor {

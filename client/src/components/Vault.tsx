@@ -14,6 +14,7 @@ import { RecoveryAdvisor } from "./AIAdvisor/RecoveryAdvisor";
 import { fetchVaultStats, type VaultStats, formatTvl, validateVaultSlug } from "../lib/vaultData";
 import VaultCapacityWarning, { type VaultCapacityStatus } from "./VaultCapacityWarning";
 import VaultMigrationReadinessPanel from "./VaultMigrationReadinessPanel";
+import SharePriceFreshnessBanner from "./SharePriceFreshnessBanner";
 import YieldSourceFeeHistoryPanel from "./YieldSourceFeeHistoryPanel";
 import { VaultRiskBadge } from "./common/VaultRiskBadge";
 
@@ -274,6 +275,10 @@ export default function Vault() {
 
       <div className="max-w-3xl w-full text-left">
         <VaultMigrationReadinessPanel vaultSlug={activeSlug} />
+      </div>
+
+      <div className="max-w-3xl w-full text-left">
+        <SharePriceFreshnessBanner vaultId={activeSlug} />
       </div>
 
       {stats && (
